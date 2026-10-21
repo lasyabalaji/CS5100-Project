@@ -1,8 +1,0 @@
-venv/
-data/hospitals/
-*.npz
-results/
-__pycache__/
-.ipynb_checkpoints/
-CLAUDE.md
-.claude/
