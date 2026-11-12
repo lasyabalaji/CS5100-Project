@@ -87,6 +87,8 @@ if __name__ == "__main__":
     save_hospitals(d["X_train"], d["y_train"], splits, out)
     # shared test set: no hospital trains on it
     np.savez_compressed("data/hospitals/test.npz", X=d["X_test"], y=d["y_test"])
+    # shared validation set: used to pick the best round / epoch, never trained on
+    np.savez_compressed("data/hospitals/val.npz", X=d["X_val"], y=d["y_val"])
     os.makedirs("results", exist_ok=True)
     plot_mix(d["y_train"], splits, f"results/hospitals_{a.mode}.png")
     print(f"saved to {out}/")
