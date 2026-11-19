@@ -61,9 +61,44 @@ python -m data.partition --mode size_skew --n 4
 | `label_skew` | Equal sizes, different tumor shares (about 26%, 18%, 10%, 2%). |
 | `size_skew` | Same tumor share, but one hospital holds half the data. |
 
-Each hospital's data is saved to its own file in `data/hospitals/<mode>/`. A shared test
-set that no hospital trains on is saved to `data/hospitals/test.npz`. The split uses a
-fixed random seed, so everyone gets identical hospitals.
+Each hospital's data is saved to its own file in `data/hospitals/<mode>/`. Two shared sets
+that no hospital trains on are saved next to them: `data/hospitals/val.npz`, used to pick
+the best epoch or round, and `data/hospitals/test.npz`, used once at the very end. The
+split uses a fixed random seed, so everyone gets identical hospitals.
+
+**4. Train one model on its own** (no federation, for the baselines)
+```bash
+python -m experiments.train_lr --setting centralized --epochs 30
+python -m experiments.train_lr --setting hospital --mode label_skew --hospital 0
+```
+
+| Setting | What it trains on |
+|---|---|
+| `centralized` | Every hospital's data pooled back together. The best case. |
+| `hospital` | One hospital's data only, chosen with `--hospital`. The worst case. |
+
+Only ~14% of images are tumor, so by default the loss counts a tumor image
+`#not tumor / #tumor` times more. Pass `--pos_weight 1` to turn that off.
+
+**5. Federated training** (FedAvg, all 4 hospitals, simulated on one machine)
+```bash
+python -m experiments.simulate_fedavg --mode iid --model lr --E 1 --rounds 50
+```
+
+`--E` is how many epochs each hospital trains before sending its weights back.
+`--normalize channel`, the default, standardizes the pixels per colour channel using six
+fixed numbers; without it both models predict "not tumor" for every image. `--model nn`
+uses `models/neural_net.py`. `--model lr` still builds the stand-in in `fed/temp_model.py`
+and trains on raw pixels in step 4, so the two are not comparable yet; both are one small
+change in `make_model()`. Early numbers are in `results/preliminary_results.md`.
+
+**6. Run the tests**
+```bash
+python -m pytest
+```
+
+Every run in steps 4 and 5 writes its metrics and best weights to its own folder under
+`results/`.
 
 ## Code organization
 
@@ -72,8 +107,17 @@ data/
   load_data.py      loads PathMNIST and creates tumor / not tumor labels
   explore.py        class balance and sample image charts
   partition.py      splits training data into mock hospitals
-models/             NumPy models written from scratch (in progress)
-experiments/        tests and experiments (in progress)
+  hospital_data.py  reads the hospital files back off disk
+models/
+  logistic_regression.py  logistic regression, with an optional weight on tumor images
+  neural_net.py           two hidden layers, ReLU, written out by hand
+fed/
+  aggregators.py    FedAvg: averages hospital weights, bigger hospitals count more
+  temp_model.py     TEMPORARY stand-in, delete once make_model() uses models/
+experiments/
+  train_lr.py          one model on its own: centralized or a single hospital
+  simulate_fedavg.py   the federated loop, simulated on one machine
+results/            charts, metrics, and saved weights from every run
 requirements.txt    Python packages
 ```
 
@@ -81,6 +125,6 @@ requirements.txt    Python packages
 
 - [x] Dataset chosen, loaded, and explored
 - [x] Mock hospitals (iid, label skew, size skew)
-- [ ] NumPy models: logistic regression and neural network
+- [x] NumPy models: logistic regression and neural network
 - [ ] Federated server and hospital clients (Docker)
 - [ ] Experiments: federated vs. single hospital vs. centralized
