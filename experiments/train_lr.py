@@ -6,6 +6,8 @@ AI Disclosure: This code is mostly AI Generated
 Run:
   python -m experiments.train_lr --setting centralized --epochs 30
   python -m experiments.train_lr --setting hospital --mode label_skew --hospital 3
+
+AI Disclousre: I psuedo coded this and made AI fill it in. AI had to fix my psuedo code
 """
 import argparse
 import json
