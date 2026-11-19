@@ -69,16 +69,17 @@ except ImportError:
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
-def make_model(name, n_features):
-    """TEMPORARY: uses the stand-in model in fed/temp_model.py.
-    Swap these lines for Abdullah's classes once models/ exists."""
+def make_model(name, n_features, seed=0):
+    """lr: TEMPORARY stand-in in fed/temp_model.py (swap for the real logistic
+           regression once it is pushed to models/).
+    nn: Abdullah's two-hidden-layer network (models/neural_net.py). seed sets its
+        random starting weights, so the server and hospitals all start the same."""
     if name == "lr":
         from fed.temp_model import TempLogisticRegression
         return TempLogisticRegression(n_features)
     if name == "nn":
-        raise NotImplementedError(
-            "The neural network is not in the repo yet (models/ is missing). "
-            "Hook it up in make_model() once Abdullah adds it.")
+        from models.neural_net import NeuralNetwork
+        return NeuralNetwork(n_features, seed=seed)
     raise ValueError(f"unknown model: {name}")
 
 
@@ -102,6 +103,22 @@ def load_hospitals(mode):
     return [load_npz(os.path.join(HOSPITAL_DIR, mode, f"hospital_{i}.npz")) for i in range(N_HOSPITALS)]
 
 
+# Per-channel (R, G, B) mean and std of the PathMNIST training pixels, from
+# results/data_summary.md. Raw pixels are all positive (mean about 0.66), which
+# makes gradient descent very slow: without this, both models predict
+# "not tumor" for every image (F1 = 0). These are 6 fixed numbers that every
+# hospital applies the same way, so no hospital's data is shared.
+CHANNEL_MEAN = np.array([0.741, 0.533, 0.706], dtype=np.float32)
+CHANNEL_STD = np.array([0.124, 0.177, 0.124], dtype=np.float32)
+
+
+def standardize(X):
+    """(x - channel mean) / channel std. Features are flattened from (28, 28, 3),
+    so the colour channel of feature i is i % 3."""
+    reps = X.shape[1] // 3
+    return ((X - np.tile(CHANNEL_MEAN, reps)) / np.tile(CHANNEL_STD, reps)).astype(np.float32)
+
+
 def evaluate(model, X, y):
     probs = model.predict(X)
     preds = (probs >= 0.5).astype(int)   # tumor if probability >= 0.5
@@ -115,16 +132,19 @@ def run(args):
     hospitals = load_hospitals(args.mode)
     X_val, y_val = load_npz(os.path.join(HOSPITAL_DIR, "val.npz"))
     X_test, y_test = load_npz(os.path.join(HOSPITAL_DIR, "test.npz"))
+    if args.normalize == "channel":
+        hospitals = [(standardize(X), y) for X, y in hospitals]
+        X_val, X_test = standardize(X_val), standardize(X_test)
     sizes = [len(y) for _, y in hospitals]
     n_features = hospitals[0][0].shape[1]
 
     print(f"mode={args.mode} model={args.model} E={args.E} rounds={args.rounds} "
-          f"lr={args.lr} batch={args.batch_size} seed={args.seed}")
+          f"lr={args.lr} batch={args.batch_size} seed={args.seed} normalize={args.normalize}")
     print(f"hospital sizes: {sizes}   metrics: {METRICS_SOURCE}")
 
     np.random.seed(args.seed)
-    global_model = make_model(args.model, n_features)   # the server's model
-    local_model = make_model(args.model, n_features)    # reused by each hospital in turn
+    global_model = make_model(args.model, n_features, args.seed)   # the server's model
+    local_model = make_model(args.model, n_features, args.seed)    # reused by each hospital in turn
 
     history = []
     best = {"round": 0, "val_f1": -1.0, "weights": global_model.get_weights()}
@@ -197,6 +217,8 @@ def parse_args(argv=None):
     p.add_argument("--lr", type=float, default=0.01)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--batch_size", type=int, default=64)
+    p.add_argument("--normalize", default="channel", choices=["channel", "none"],
+                   help="channel: standardize pixels per colour channel (default); none: raw [0, 1]")
     p.add_argument("--run_name", default=None, help="folder name under results/ (auto if not given)")
     a = p.parse_args(argv)
     if a.E < 1 or a.rounds < 1:
